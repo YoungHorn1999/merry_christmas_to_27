@@ -352,7 +352,24 @@ star.add(starGlow);
 
 
 // Interaction
+// Audio Auto-play handling
+const bgm = document.getElementById('bgm');
+// Try to play immediately (might work if user has interacted with domain before)
+bgm.play().catch(e => {
+    console.log("Autoplay prevented, waiting for interaction");
+});
+
+// Drag logic variables
+let isDragging = false;
+let previousMousePosition = { x: 0, y: 0 };
+let particleRotationOffset = 0;
+
 window.addEventListener('click', () => {
+    // Ensure music plays on first click if autoplay was blocked
+    if (bgm.paused) {
+        bgm.play();
+    }
+
     // Only check for photo clicks if exploded (photos are visible)
     if (isExploded) {
         raycaster.setFromCamera(mouseVector, camera);
@@ -421,6 +438,45 @@ let mouseY = 0;
 const mouseVector = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
 
+// --- Drag & Touch Interaction ---
+const onDragStart = (x, y) => {
+    // Ensure music plays on interaction
+    if (bgm && bgm.paused) {
+        bgm.play().catch(() => {});
+    }
+
+    if (isExploded) {
+        isDragging = true;
+        previousMousePosition = { x, y };
+    }
+};
+
+const onDragMove = (x, y) => {
+    if (isDragging && isExploded) {
+        const deltaMove = {
+            x: x - previousMousePosition.x,
+            y: y - previousMousePosition.y
+        };
+        
+        // Horizontal drag rotates the particle cloud
+        // Mobile sensitivity might need to be higher, but this is a good start
+        particleRotationOffset += deltaMove.x * 0.005; 
+        
+        previousMousePosition = { x, y };
+    }
+};
+
+const onDragEnd = () => {
+    // We set isDragging to false with a small timeout to prevent click trigger immediately after drag
+    setTimeout(() => {
+        isDragging = false;
+    }, 10);
+};
+
+// Mouse Listeners
+document.addEventListener('mousedown', (e) => onDragStart(e.clientX, e.clientY));
+document.addEventListener('mouseup', onDragEnd);
+
 document.addEventListener('mousemove', (event) => {
     mouseX = (event.clientX - window.innerWidth / 2) * 0.001;
     mouseY = (event.clientY - window.innerHeight / 2) * 0.001;
@@ -428,7 +484,25 @@ document.addEventListener('mousemove', (event) => {
     // Update normalized device coordinates for Raycaster
     mouseVector.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouseVector.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    onDragMove(event.clientX, event.clientY);
 });
+
+// Touch Listeners
+document.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+        onDragStart(e.touches[0].clientX, e.touches[0].clientY);
+    }
+}, { passive: false });
+
+document.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 1) {
+        onDragMove(e.touches[0].clientX, e.touches[0].clientY);
+    }
+}, { passive: false });
+
+document.addEventListener('touchend', onDragEnd);
+// --------------------------------
 
 // Animation
 const clock = new THREE.Clock();
@@ -443,6 +517,15 @@ function animate() {
     particles.rotation.y += 0.003;
     if(isExploded) {
         particles.rotation.y -= 0.004; // Spin faster/differently when exploded
+        
+        // Apply Drag Rotation
+        particles.rotation.y += particleRotationOffset;
+        
+        // Decay the offset (inertia/damping)
+        particleRotationOffset *= 0.95; 
+    } else {
+        // Reset offset when not exploded
+        particleRotationOffset = 0;
     }
 
     // Star animation
