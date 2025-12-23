@@ -127,6 +127,142 @@ const material = new THREE.PointsMaterial({
 particles = new THREE.Points(geometry, material);
 scene.add(particles);
 
+// Helper to create Polaroid texture
+const createPolaroidTexture = (imageElement) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Standard Polaroid aspect ratio roughly 3.5x4.2
+    // We'll use 350x420 for good resolution
+    const width = 350;
+    const height = 420;
+    const padding = 25;
+    const bottomPadding = 80; // Larger bottom area for writing
+    
+    canvas.width = width;
+    canvas.height = height;
+    
+    // 1. Draw Paper Background (White/Cream)
+    ctx.fillStyle = '#f8f8f8';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Add subtle shadow/gradient for depth
+    const grad = ctx.createLinearGradient(0, 0, width, height);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(1, '#f0f0f0');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+    
+    // 2. Draw Photo
+    // Image area size
+    const imgWidth = width - (padding * 2);
+    const imgHeight = width - (padding * 2); // Square photo area usually
+    
+    try {
+        ctx.drawImage(imageElement, padding, padding, imgWidth, imgHeight);
+    } catch (e) {
+        // Fallback if image fails or tainted
+        ctx.fillStyle = '#333';
+        ctx.fillRect(padding, padding, imgWidth, imgHeight);
+    }
+    
+    // 3. Draw Inner Shadow on photo edge
+    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(padding, padding, imgWidth, imgHeight);
+    
+    const texture = new THREE.Texture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+};
+
+// --- Photos ---
+const photoUrls = [
+    'https://picsum.photos/id/1015/200/200',
+    'https://picsum.photos/id/1016/200/200',
+    'https://picsum.photos/id/1018/200/200',
+    'https://picsum.photos/id/1019/200/200',
+    'https://picsum.photos/id/1020/200/200',
+    'https://picsum.photos/id/1021/200/200',
+    'https://picsum.photos/id/1022/200/200',
+    'https://picsum.photos/id/1023/200/200',
+    'https://picsum.photos/id/1024/200/200',
+    'https://picsum.photos/id/1025/200/200'
+];
+
+const photoObjects = [];
+const photoTextureLoader = new THREE.ImageLoader(); // Changed to ImageLoader to manipulate canvas
+
+photoUrls.forEach((url, i) => {
+    // Enable cross-origin for canvas manipulation
+    photoTextureLoader.setCrossOrigin('anonymous');
+    
+    photoTextureLoader.load(url, (image) => {
+        const texture = createPolaroidTexture(image);
+        
+        const material = new THREE.SpriteMaterial({ 
+            map: texture, 
+            opacity: 0, 
+            transparent: true,
+            depthTest: false // Render on top of particles
+        });
+        const sprite = new THREE.Sprite(material);
+        sprite.renderOrder = 999;
+        
+        // Base scale - Adjusted for Polaroid aspect ratio (3.5 : 4.2)
+        // Previous scale was 8 (square). 
+        // We want width ~8, so height should be 8 * (420/350) = 9.6
+        sprite.userData.baseScaleX = 8;
+        sprite.userData.baseScaleY = 9.6;
+        
+        sprite.scale.set(sprite.userData.baseScaleX, sprite.userData.baseScaleY, 1);
+        sprite.userData.isExpanded = false;
+
+        // Tree Position (scattered on surface)
+        const normHeight = Math.random(); 
+        const height = -50 + normHeight * 100; 
+        const radiusAtHeight = 45 * (1 - normHeight) + 5; 
+        const angle = randomRange(0, Math.PI * 2);
+        
+        sprite.userData.treePos = new THREE.Vector3(
+            Math.cos(angle) * radiusAtHeight,
+            height,
+            Math.sin(angle) * radiusAtHeight
+        );
+
+        // Explosion Position - Safe Zone & No Overlap
+        let safePos = new THREE.Vector3();
+        let attempts = 0;
+        let valid = false;
+        
+        while (!valid && attempts < 100) {
+            safePos.set(
+                randomRange(-50, 50),
+                randomRange(-20, 70),
+                randomRange(-20, 50)
+            );
+            
+            // Check collision
+            valid = true;
+            for (let p of photoObjects) {
+                if (p.userData.explosionPos && p.userData.explosionPos.distanceTo(safePos) < 25) { 
+                    valid = false;
+                    break;
+                }
+            }
+            attempts++;
+        }
+        
+        sprite.userData.explosionPos = safePos.clone();
+
+        // Current Pos (start at tree)
+        sprite.position.copy(sprite.userData.treePos);
+
+        scene.add(sprite);
+        photoObjects.push(sprite);
+    });
+});
+
 // Star Top
 // Create a 5-pointed star shape
 const createStarShape = (outerRadius, innerRadius) => {
@@ -173,10 +309,52 @@ star.add(starGlow);
 
 
 // Interaction
-// Raycaster could be used to click *on* the tree, but full screen click is easier for this UX
 window.addEventListener('click', () => {
+    // Only check for photo clicks if exploded (photos are visible)
+    if (isExploded) {
+        raycaster.setFromCamera(mouseVector, camera);
+        const intersects = raycaster.intersectObjects(photoObjects);
+
+        if (intersects.length > 0) {
+            // Clicked on a photo
+            const targetSprite = intersects[0].object;
+            
+            // If already expanded, shrink it back
+            if (targetSprite.userData.isExpanded) {
+                targetSprite.userData.isExpanded = false;
+            } else {
+                // Shrink any other expanded photos
+                photoObjects.forEach(p => {
+                    p.userData.isExpanded = false;
+                });
+                // Expand this one
+                targetSprite.userData.isExpanded = true;
+            }
+            return; // Handled photo click, don't toggle tree
+        }
+        
+        // Clicked on background while exploded -> check if we need to close a photo
+        let hadExpanded = false;
+        photoObjects.forEach(p => {
+            if (p.userData.isExpanded) {
+                p.userData.isExpanded = false;
+                hadExpanded = true;
+            }
+        });
+        
+        if (hadExpanded) return; // Just closed a photo, don't toggle tree
+    }
+
+    // Toggle tree state (if not handled above)
     isExploded = !isExploded;
     star.visible = !isExploded;
+    
+    // If going back to tree mode, ensure all photos are reset
+    if (!isExploded) {
+        photoObjects.forEach(p => {
+            p.userData.isExpanded = false;
+        });
+    }
 });
 
 // Resize
@@ -191,10 +369,17 @@ let targetRotationX = 0;
 let targetRotationY = 0;
 let mouseX = 0;
 let mouseY = 0;
+// For Raycaster
+const mouseVector = new THREE.Vector2();
+const raycaster = new THREE.Raycaster();
 
 document.addEventListener('mousemove', (event) => {
     mouseX = (event.clientX - window.innerWidth / 2) * 0.001;
     mouseY = (event.clientY - window.innerHeight / 2) * 0.001;
+    
+    // Update normalized device coordinates for Raycaster
+    mouseVector.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouseVector.y = -(event.clientY / window.innerHeight) * 2 + 1;
 });
 
 // Animation
@@ -222,6 +407,29 @@ function animate() {
     camera.position.x += (mouseX * 100 - camera.position.x) * 0.05;
     camera.position.y += (-mouseY * 100 + 30 - camera.position.y) * 0.05;
     camera.lookAt(0, 10, 0);
+
+    // Update Photos
+    const photoLerpFactor = 0.05;
+    const targetOpacity = isExploded ? 1.0 : 0.0;
+    
+    photoObjects.forEach(sprite => {
+        // Position
+        const targetPos = isExploded ? sprite.userData.explosionPos : sprite.userData.treePos;
+        sprite.position.lerp(targetPos, photoLerpFactor);
+        
+        // Scale
+        const scaleMult = sprite.userData.isExpanded ? 2.5 : 1.0;
+        const targetScaleX = sprite.userData.baseScaleX * scaleMult;
+        const targetScaleY = sprite.userData.baseScaleY * scaleMult;
+        
+        sprite.scale.x += (targetScaleX - sprite.scale.x) * 0.1;
+        sprite.scale.y += (targetScaleY - sprite.scale.y) * 0.1;
+
+        // Opacity
+        sprite.material.opacity += (targetOpacity - sprite.material.opacity) * 0.05;
+        // Optimization: set visible to false if opacity is very low
+        sprite.visible = sprite.material.opacity > 0.01;
+    });
 
     // Particle Transition
     const positionsAttribute = particles.geometry.attributes.position;
