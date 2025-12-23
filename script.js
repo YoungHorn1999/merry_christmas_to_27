@@ -176,6 +176,7 @@ star.add(starGlow);
 // Raycaster could be used to click *on* the tree, but full screen click is easier for this UX
 window.addEventListener('click', () => {
     isExploded = !isExploded;
+    star.visible = !isExploded;
 });
 
 // Resize
