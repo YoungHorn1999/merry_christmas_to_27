@@ -17,7 +17,7 @@ let positions = [];
 let treePositions = [];
 let explosionPositions = [];
 let colors = [];
-const particleCount = 20000;
+const particleCount = 30000;
 let isExploded = false;
 
 // Geometry
@@ -97,24 +97,24 @@ geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 // Texture for glow
 const getTexture = () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 64; // Optimize size, 64 is enough for sharp texture
-    canvas.height = 64;
+    canvas.width = 128; // Increased resolution for HD
+    canvas.height = 128;
     const ctx = canvas.getContext('2d');
-    const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
     // Sharper gradient for clearer particles
     grad.addColorStop(0, 'rgba(255,255,255,1)');
     grad.addColorStop(0.2, 'rgba(255,255,255,0.9)'); // Solid core
     grad.addColorStop(0.4, 'rgba(255,255,255,0.2)'); // Quick falloff
     grad.addColorStop(1.0, 'rgba(0,0,0,0)');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillRect(0, 0, 128, 128);
     const texture = new THREE.Texture(canvas);
     texture.needsUpdate = true;
     return texture;
 };
 
 const material = new THREE.PointsMaterial({
-    size: 1.8, // Slightly smaller size for sharper look
+    size: 1.5, // Slightly smaller size for sharper look with more particles
     vertexColors: true,
     map: getTexture(),
     blending: THREE.AdditiveBlending,
@@ -207,9 +207,9 @@ function animate() {
     const delta = clock.getDelta();
 
     // Smooth rotation
-    particles.rotation.y += 0.001;
+    particles.rotation.y += 0.003;
     if(isExploded) {
-        particles.rotation.y -= 0.002; // Spin faster/differently when exploded
+        particles.rotation.y -= 0.004; // Spin faster/differently when exploded
     }
 
     // Star animation
