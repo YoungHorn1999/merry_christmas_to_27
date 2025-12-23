@@ -445,10 +445,8 @@ const onDragStart = (x, y) => {
         bgm.play().catch(() => {});
     }
 
-    if (isExploded) {
-        isDragging = true;
-        previousMousePosition = { x, y };
-    }
+    // 粒子云展开后禁用拖动
+    // Dragging disabled when exploded
 };
 
 const onDragMove = (x, y) => {
