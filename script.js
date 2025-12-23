@@ -132,63 +132,72 @@ const createPolaroidTexture = (imageElement) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     
-    // Standard Polaroid aspect ratio roughly 3.5x4.2
-    // We'll use 350x420 for good resolution
-    const width = 350;
-    const height = 420;
+    // Determine dimensions based on image aspect ratio
+    // We want a fixed width for the Polaroid card, but height varies
+    const cardWidth = 350;
     const padding = 25;
-    const bottomPadding = 80; // Larger bottom area for writing
+    const bottomPadding = 80; 
     
-    canvas.width = width;
-    canvas.height = height;
+    // Calculate image dimensions to fit within the card width (minus padding)
+    const imgAvailableWidth = cardWidth - (padding * 2);
+    const imgNaturalRatio = imageElement.width / imageElement.height;
+    
+    // Calculated height for the image area
+    const imgDrawHeight = imgAvailableWidth / imgNaturalRatio;
+    
+    // Total card height
+    const cardHeight = padding + imgDrawHeight + bottomPadding;
+    
+    canvas.width = cardWidth;
+    canvas.height = cardHeight;
     
     // 1. Draw Paper Background (White/Cream)
     ctx.fillStyle = '#f8f8f8';
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, cardWidth, cardHeight);
     
     // Add subtle shadow/gradient for depth
-    const grad = ctx.createLinearGradient(0, 0, width, height);
+    const grad = ctx.createLinearGradient(0, 0, cardWidth, cardHeight);
     grad.addColorStop(0, '#ffffff');
     grad.addColorStop(1, '#f0f0f0');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, cardWidth, cardHeight);
     
     // 2. Draw Photo
-    // Image area size
-    const imgWidth = width - (padding * 2);
-    const imgHeight = width - (padding * 2); // Square photo area usually
-    
     try {
-        ctx.drawImage(imageElement, padding, padding, imgWidth, imgHeight);
+        ctx.drawImage(imageElement, padding, padding, imgAvailableWidth, imgDrawHeight);
     } catch (e) {
-        // Fallback if image fails or tainted
+        // Fallback
         ctx.fillStyle = '#333';
-        ctx.fillRect(padding, padding, imgWidth, imgHeight);
+        ctx.fillRect(padding, padding, imgAvailableWidth, imgDrawHeight);
     }
     
     // 3. Draw Inner Shadow on photo edge
     ctx.strokeStyle = 'rgba(0,0,0,0.1)';
     ctx.lineWidth = 1;
-    ctx.strokeRect(padding, padding, imgWidth, imgHeight);
+    ctx.strokeRect(padding, padding, imgAvailableWidth, imgDrawHeight);
     
     const texture = new THREE.Texture(canvas);
     texture.needsUpdate = true;
-    return texture;
+    
+    // Return texture AND aspect ratio for sprite scaling
+    return { texture, aspectRatio: cardWidth / cardHeight };
 };
 
 // --- Photos ---
-const photoUrls = [
-    'https://picsum.photos/id/1015/200/200',
-    'https://picsum.photos/id/1016/200/200',
-    'https://picsum.photos/id/1018/200/200',
-    'https://picsum.photos/id/1019/200/200',
-    'https://picsum.photos/id/1020/200/200',
-    'https://picsum.photos/id/1021/200/200',
-    'https://picsum.photos/id/1022/200/200',
-    'https://picsum.photos/id/1023/200/200',
-    'https://picsum.photos/id/1024/200/200',
-    'https://picsum.photos/id/1025/200/200'
-];
+// Instruct user to name files photo1.jpg, photo2.jpg, etc. or just use a loop to try loading
+// Since we can't list files in client-side JS without a server, we will try to load a range of numbered files.
+// Or we can provide a default list and comments.
+
+const photoUrls = [];
+// Automatically try to load p1.jpg through p50.jpg
+// Users just need to drop files named p1.jpg, p2.jpg, etc. into the 'images' folder.
+for (let i = 1; i <= 50; i++) {
+    photoUrls.push(`./images/p${i}.jpg`);
+}
+
+// Also adding support for png just in case, though mixing arrays is tricky without checking existence.
+// A better approach for a static site is to just define a list of potential filenames.
+// Let's stick to a convention: p1.jpg, p2.jpg... 
 
 const photoObjects = [];
 const photoTextureLoader = new THREE.ImageLoader(); // Changed to ImageLoader to manipulate canvas
@@ -197,74 +206,104 @@ photoUrls.forEach((url, i) => {
     // Enable cross-origin for canvas manipulation
     photoTextureLoader.setCrossOrigin('anonymous');
     
-    photoTextureLoader.load(url, (image) => {
-        const texture = createPolaroidTexture(image);
-        
-        const material = new THREE.SpriteMaterial({ 
-            map: texture, 
-            opacity: 0, 
-            transparent: true,
-            depthTest: false // Render on top of particles
-        });
-        const sprite = new THREE.Sprite(material);
-        sprite.renderOrder = 999;
-        
-        // Base scale - Adjusted for Polaroid aspect ratio (3.5 : 4.2)
-        // Previous scale was 8 (square). 
-        // We want width ~8, so height should be 8 * (420/350) = 9.6
-        sprite.userData.baseScaleX = 8;
-        sprite.userData.baseScaleY = 9.6;
-        
-        sprite.scale.set(sprite.userData.baseScaleX, sprite.userData.baseScaleY, 1);
-        sprite.userData.isExpanded = false;
-
-        // Random Rotation (Tilt)
-        sprite.userData.randomRotation = randomRange(-0.25, 0.25); // +/- ~15 degrees
-        sprite.material.rotation = sprite.userData.randomRotation;
-
-        // Tree Position (scattered on surface)
-        const normHeight = Math.random(); 
-        const height = -50 + normHeight * 100; 
-        const radiusAtHeight = 45 * (1 - normHeight) + 5; 
-        const angle = randomRange(0, Math.PI * 2);
-        
-        sprite.userData.treePos = new THREE.Vector3(
-            Math.cos(angle) * radiusAtHeight,
-            height,
-            Math.sin(angle) * radiusAtHeight
-        );
-
-        // Explosion Position - Safe Zone & No Overlap
-        let safePos = new THREE.Vector3();
-        let attempts = 0;
-        let valid = false;
-        
-        while (!valid && attempts < 100) {
-            safePos.set(
-                randomRange(-50, 50),
-                randomRange(-20, 70),
-                randomRange(-20, 50)
-            );
+    photoTextureLoader.load(
+        url, 
+        (image) => {
+            // Success callback
+            const { texture, aspectRatio } = createPolaroidTexture(image);
             
-            // Check collision
-            valid = true;
-            for (let p of photoObjects) {
-                if (p.userData.explosionPos && p.userData.explosionPos.distanceTo(safePos) < 25) { 
-                    valid = false;
-                    break;
+            const material = new THREE.SpriteMaterial({ 
+                map: texture, 
+                opacity: 0, 
+                transparent: true,
+                depthTest: false // Render on top of particles
+            });
+            const sprite = new THREE.Sprite(material);
+            sprite.renderOrder = 999;
+            
+            // Base scale - Adaptive based on generated card aspect ratio
+            // We keep width fixed at roughly 8 units
+            sprite.userData.baseScaleX = 8;
+            sprite.userData.baseScaleY = 8 / aspectRatio;
+            
+            sprite.scale.set(sprite.userData.baseScaleX, sprite.userData.baseScaleY, 1);
+            sprite.userData.isExpanded = false;
+
+            // Random Rotation (Tilt)
+            // Increased range for more casual/messy look
+            sprite.userData.randomRotation = randomRange(-0.5, 0.5); // +/- ~30 degrees (was 0.25)
+            sprite.material.rotation = sprite.userData.randomRotation;
+
+            // Tree Position (scattered on surface)
+            const normHeight = Math.random(); 
+            const height = -50 + normHeight * 100; 
+            const radiusAtHeight = 45 * (1 - normHeight) + 5; 
+            const angle = randomRange(0, Math.PI * 2);
+            
+            sprite.userData.treePos = new THREE.Vector3(
+                Math.cos(angle) * radiusAtHeight,
+                height,
+                Math.sin(angle) * radiusAtHeight
+            );
+
+            // Random Float Parameters
+            sprite.userData.floatSpeed = randomRange(0.8, 2.0); // Faster speed
+            sprite.userData.floatOffset = randomRange(0, Math.PI * 2);
+            sprite.userData.floatAmp = randomRange(2.0, 4.0); // Larger amplitude (was 0.5-1.5)
+
+            // Explosion Position - Safe Zone & No Overlap
+            let safePos = new THREE.Vector3();
+            let attempts = 0;
+            let valid = false;
+            
+            while (!valid && attempts < 100) {
+                // Modified range to keep photos in bottom 2/3 of screen
+                // Camera Y is 30. Looking at (0,10,0).
+                // Screen top is roughly Y=60-70, Bottom is Y=-10 to -20
+                // To restrict to bottom 2/3, we want lower Y values.
+                // Range: X(-35 to 35), Y(-25 to 35), Z(0 to 60)
+                // Previous Y was (-5 to 55)
+                
+                safePos.set(
+                    randomRange(-35, 35),
+                    randomRange(-25, 35), // Shifted down. Max height lowered.
+                    randomRange(0, 60)
+                );
+                
+                // Check collision
+                valid = true;
+                for (let p of photoObjects) {
+                    // Buffer distance: 
+                    // Each photo is roughly 10 units wide/tall. 
+                    // We want at least 15 units distance center-to-center to ensure no overlap even with rotation
+                    if (p.userData.explosionPos && p.userData.explosionPos.distanceTo(safePos) < 15) { 
+                        valid = false;
+                        break;
+                    }
                 }
+                attempts++;
             }
-            attempts++;
+            
+            // If we failed to find a spot (rare with few photos), force push it further away to minimize visual overlap
+            if (!valid) {
+                 safePos.z -= 10; 
+            }
+            
+            sprite.userData.explosionPos = safePos.clone();
+
+            // Current Pos (start at tree)
+            sprite.position.copy(sprite.userData.treePos);
+
+            scene.add(sprite);
+            photoObjects.push(sprite);
+        },
+        undefined, // onProgress
+        (err) => {
+            // onError: File not found or load error
+            // We just ignore it, so only existing files are added.
+            // console.warn('Could not load photo:', url);
         }
-        
-        sprite.userData.explosionPos = safePos.clone();
-
-        // Current Pos (start at tree)
-        sprite.position.copy(sprite.userData.treePos);
-
-        scene.add(sprite);
-        photoObjects.push(sprite);
-    });
+    );
 });
 
 // Star Top
@@ -326,13 +365,16 @@ window.addEventListener('click', () => {
             // If already expanded, shrink it back
             if (targetSprite.userData.isExpanded) {
                 targetSprite.userData.isExpanded = false;
+                targetSprite.renderOrder = 999; // Reset order
             } else {
                 // Shrink any other expanded photos
                 photoObjects.forEach(p => {
                     p.userData.isExpanded = false;
+                    p.renderOrder = 999; // Reset order
                 });
                 // Expand this one
                 targetSprite.userData.isExpanded = true;
+                targetSprite.renderOrder = 10000; // Bring to front
             }
             return; // Handled photo click, don't toggle tree
         }
@@ -342,6 +384,7 @@ window.addEventListener('click', () => {
         photoObjects.forEach(p => {
             if (p.userData.isExpanded) {
                 p.userData.isExpanded = false;
+                p.renderOrder = 999; // Reset order
                 hadExpanded = true;
             }
         });
@@ -357,6 +400,7 @@ window.addEventListener('click', () => {
     if (!isExploded) {
         photoObjects.forEach(p => {
             p.userData.isExpanded = false;
+            p.renderOrder = 999; // Reset order
         });
     }
 });
@@ -419,10 +463,22 @@ function animate() {
     photoObjects.forEach(sprite => {
         // Position
         const targetPos = isExploded ? sprite.userData.explosionPos : sprite.userData.treePos;
-        sprite.position.lerp(targetPos, photoLerpFactor);
+        
+        // Add Floating Motion (Harry Potter style)
+        // Only float when exploded and NOT expanded (inspected)
+        let floatY = 0;
+        if (isExploded && !sprite.userData.isExpanded) {
+             floatY = Math.sin(time * sprite.userData.floatSpeed + sprite.userData.floatOffset) * sprite.userData.floatAmp;
+        }
+
+        // Lerp to target position
+        sprite.position.x += (targetPos.x - sprite.position.x) * photoLerpFactor;
+        sprite.position.y += ((targetPos.y + floatY) - sprite.position.y) * photoLerpFactor;
+        sprite.position.z += (targetPos.z - sprite.position.z) * photoLerpFactor;
         
         // Scale
-        const scaleMult = sprite.userData.isExpanded ? 2.5 : 1.0;
+        // Increased zoom scale from 2.5 to 4.0 for larger view
+        const scaleMult = sprite.userData.isExpanded ? 4.0 : 1.0;
         const targetScaleX = sprite.userData.baseScaleX * scaleMult;
         const targetScaleY = sprite.userData.baseScaleY * scaleMult;
         
