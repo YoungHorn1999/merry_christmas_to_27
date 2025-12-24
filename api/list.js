@@ -12,10 +12,8 @@ export default async function handler(req, res) {
   try {
     const { blobs } = await list();
 
-    // Filter only image files and return URLs
-    const imageUrls = blobs
-      .filter(blob => /\.(jpg|jpeg|png|gif|webp)$/i.test(blob.pathname))
-      .map(blob => blob.url);
+    // Return all blob URLs (filtering handled by upload side)
+    const imageUrls = blobs.map(blob => blob.url);
 
     res.status(200).json(imageUrls);
   } catch (error) {
